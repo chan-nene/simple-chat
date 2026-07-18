@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+*.log
+.pytest_cache/
+.test-tmp/
+.venv/
+.env
+.env.*
+!.env.example
+config.toml
+data/
+playwright-report/
+test-results/
+htmlcov/
+.coverage
+.coverage.*
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local development notes and review artifacts
+issues.local.md
+spec.md
+ui-review.html
