@@ -22,6 +22,7 @@ def test_health_and_public_config(client: TestClient) -> None:
 
     public = client.get("/api/config/public").json()
     assert public["app_title"] == "Simple Chat"
+    assert public["ai_icon_url"] == "/favicon.svg"
     assert public["history_days"] == 7
     assert {model["key"] for model in public["models"]} == {
         "gpt-5.6-luna",

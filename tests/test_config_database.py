@@ -43,6 +43,9 @@ def test_canonical_toml_and_paths_are_project_root_relative(tmp_path: Path) -> N
         CANONICAL.replace("supports_streaming = true", "supports_streaming = false", 1),
         CANONICAL.replace("remove_exif = true", "remove_exif = false"),
         CANONICAL.replace('path = "data/chat.db"', 'path = "../outside.db"'),
+        CANONICAL.replace('ai_icon = "/favicon.svg"', 'ai_icon = "https://example.com/icon.png"'),
+        CANONICAL.replace('ai_icon = "/favicon.svg"', 'ai_icon = "/../outside.png"'),
+        CANONICAL.replace('ai_icon = "/favicon.svg"', 'ai_icon = "/icon.txt"'),
     ],
 )
 def test_invalid_configuration_is_rejected(tmp_path: Path, mutated: str) -> None:

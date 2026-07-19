@@ -4,6 +4,7 @@ import os
 import tomllib
 from pathlib import Path
 from typing import Literal
+from urllib.parse import unquote
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -128,6 +129,27 @@ class ServerSettings(StrictModel):
 
 class UiSettings(StrictModel):
     title: str = Field(min_length=1, max_length=120)
+    ai_icon: str = "/favicon.svg"
+
+    @field_validator("ai_icon", mode="before")
+    @classmethod
+    def validate_ai_icon(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        value = value.strip()
+        decoded = unquote(value)
+        if (
+            not value.startswith("/")
+            or value.startswith("//")
+            or "\\" in decoded
+            or "?" in decoded
+            or "#" in decoded
+            or any(part in {"", ".", ".."} for part in decoded.split("/")[1:])
+        ):
+            raise ValueError("ui.ai_icon must be a root-relative static image path")
+        if Path(decoded).suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"}:
+            raise ValueError("ui.ai_icon must reference a supported image file")
+        return value
 
 
 class Settings(StrictModel):
@@ -165,6 +187,7 @@ class Settings(StrictModel):
     def public_dict(self, *, api_key_available: bool) -> dict[str, object]:
         return {
             "app_title": self.ui.title,
+            "ai_icon_url": self.ui.ai_icon,
             "provider": self.llm.provider,
             "default_model_key": self.llm.default_model_key,
             "llm_configured": api_key_available,

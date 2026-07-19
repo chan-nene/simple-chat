@@ -30,6 +30,10 @@ const elements = {
   stopButton: document.querySelector("#stop-button"),
   toastRegion: document.querySelector("#toast-region"),
   streamStatus: document.querySelector("#stream-status"),
+  deleteConfirm: document.querySelector("#delete-confirm"),
+  deleteConfirmTitle: document.querySelector("#delete-confirm-title"),
+  deleteConfirmCancel: document.querySelector("#delete-confirm-cancel"),
+  deleteConfirmSubmit: document.querySelector("#delete-confirm-submit"),
   confirmDialog: document.querySelector("#confirm-dialog"),
   dialogTitle: document.querySelector("#dialog-title"),
   dialogMessage: document.querySelector("#dialog-message"),
@@ -44,6 +48,7 @@ const state = {
   config: null,
   conversations: [],
   activeId: null,
+  draftModelKey: null,
   messages: [],
   pendingFiles: [],
   generating: false,
@@ -76,11 +81,7 @@ async function initialize() {
     state.conversations = conversations;
     applyConfig();
     renderConversationList();
-    if (state.conversations.length === 0) {
-      await createConversation(config.default_model_key);
-    } else {
-      await selectConversation(state.conversations[0].id);
-    }
+    beginNewChat(config.default_model_key);
   } catch (error) {
     showToast(error.message || "アプリを初期化できませんでした。", "error", 8000);
     showBanner("ローカルサーバーへ接続できません。ページを再読み込みしてください。");
@@ -90,7 +91,7 @@ async function initialize() {
 function bindEvents() {
   elements.newChat.addEventListener("click", () => {
     const selected = elements.modelSelect.value || state.config?.default_model_key;
-    createConversation(selected).catch(reportError);
+    beginNewChat(selected);
   });
   elements.openSidebar.addEventListener("click", openSidebar);
   elements.sidebarToggle.addEventListener("click", toggleSidebar);
@@ -160,17 +161,30 @@ function renderModelOptions() {
   }
 }
 
-async function createConversation(modelKey) {
+function beginNewChat(modelKey) {
   if (state.generating) return;
-  const conversation = await apiJson("/api/conversations", {
-    method: "POST",
-    json: { model_key: modelKey || state.config.default_model_key },
-  });
-  state.conversations.unshift(conversation);
+  state.activeId = null;
+  state.draftModelKey = modelKey || state.config.default_model_key;
+  state.messages = [];
   renderConversationList();
-  await selectConversation(conversation.id);
+  renderDraftHeader();
+  renderMessages({ forceBottom: true });
+  updateComposerState();
   closeSidebar();
   elements.composerInput.focus();
+}
+
+async function materializeDraftConversation() {
+  const conversation = await apiJson("/api/conversations", {
+    method: "POST",
+    json: { model_key: state.draftModelKey || state.config.default_model_key },
+  });
+  state.activeId = conversation.id;
+  state.draftModelKey = null;
+  state.conversations.unshift(conversation);
+  renderConversationList();
+  renderActiveHeader(conversation);
+  return conversation;
 }
 
 async function refreshConversations() {
@@ -186,6 +200,7 @@ async function selectConversation(conversationId) {
     return;
   }
   state.activeId = conversationId;
+  state.draftModelKey = null;
   const [conversation, messages] = await Promise.all([
     apiJson(`/api/conversations/${conversationId}`),
     apiJson(`/api/conversations/${conversationId}/messages`),
@@ -220,6 +235,11 @@ function renderActiveHeader(conversation) {
   elements.modelSelect.disabled = busy || !state.config.models.length;
 }
 
+function renderDraftHeader() {
+  elements.modelSelect.value = state.draftModelKey || state.config.default_model_key;
+  elements.modelSelect.disabled = state.generating || !state.config.models.length;
+}
+
 function renderConversationList() {
   elements.conversationList.replaceChildren();
   elements.conversationCount.textContent = String(state.conversations.length);
@@ -250,7 +270,12 @@ function renderConversationList() {
     const actions = document.createElement("div");
     actions.className = "conversation-actions";
     const rename = miniAction("編集", "会話タイトルを変更", () => openRename(conversation.id));
-    const remove = miniAction("×", "会話を削除", () => deleteConversation(conversation.id), "delete");
+    const remove = miniAction(
+      "×",
+      "会話を削除",
+      (button) => deleteConversation(conversation.id, button),
+      "delete",
+    );
     actions.append(rename, remove);
     item.append(open, actions);
     elements.conversationList.append(item);
@@ -265,15 +290,19 @@ function miniAction(text, label, handler, extraClass = "") {
   button.setAttribute("aria-label", label);
   button.addEventListener("click", (event) => {
     event.stopPropagation();
-    handler();
+    handler(button);
   });
   return button;
 }
 
 async function handleModelChange() {
   const conversation = activeConversation();
-  if (!conversation) return;
   const requested = elements.modelSelect.value;
+  if (!conversation) {
+    state.draftModelKey = requested;
+    updateComposerState();
+    return;
+  }
   if (requested === conversation.model_key) return;
   if (conversation.has_messages) {
     const accepted = await askConfirm({
@@ -337,7 +366,7 @@ async function openRename(conversationId) {
   }
 }
 
-async function deleteConversation(conversationId) {
+async function deleteConversation(conversationId, anchor) {
   if (!conversationId || state.generating) return;
   const conversation = state.conversations.find((item) => item.id === conversationId);
   if (!conversation) return;
@@ -345,11 +374,7 @@ async function deleteConversation(conversationId) {
     showToast("回答生成中の会話は削除できません。", "error");
     return;
   }
-  const accepted = await askConfirm({
-    title: "会話を削除しますか？",
-    message: `「${conversation.title}」のローカル履歴と添付画像を削除します。この操作は元に戻せません。`,
-    confirmLabel: "削除",
-  });
+  const accepted = await askDeleteConfirm(conversation, anchor);
   if (!accepted) return;
   try {
     await apiJson(`/api/conversations/${conversationId}`, { method: "DELETE" });
@@ -358,7 +383,7 @@ async function deleteConversation(conversationId) {
       state.activeId = null;
       state.messages = [];
       if (state.conversations.length) await selectConversation(state.conversations[0].id);
-      else await createConversation(state.config.default_model_key);
+      else beginNewChat(state.config.default_model_key);
     } else {
       renderConversationList();
     }
@@ -464,11 +489,20 @@ function renderMessage(message) {
     error.textContent = message.error_message;
     content.append(error);
   }
-  article.append(content);
-  if (message.role === "user") {
-    article.append(userAvatar());
-  }
+  if (message.role === "assistant") article.append(aiAvatar(), content);
+  else article.append(content, userAvatar());
   return article;
+}
+
+function aiAvatar() {
+  const avatar = document.createElement("div");
+  avatar.className = "ai-avatar";
+  const image = document.createElement("img");
+  image.src = state.config.ai_icon_url;
+  image.alt = "AI";
+  image.addEventListener("error", () => avatar.classList.add("image-error"), { once: true });
+  avatar.append(image);
+  return avatar;
 }
 
 function userAvatar() {
@@ -500,6 +534,12 @@ function renderAssistant(container, markdown, streaming) {
   }
   if (!streaming) decorateCodeBlocks(container);
   if (streaming) {
+    if (!markdown) {
+      const placeholder = document.createElement("span");
+      placeholder.className = "generation-placeholder";
+      placeholder.textContent = "回答を生成中…";
+      container.append(placeholder);
+    }
     const cursor = document.createElement("span");
     cursor.className = "stream-cursor";
     cursor.setAttribute("aria-hidden", "true");
@@ -613,7 +653,7 @@ function renderMessageImages(attachments) {
 }
 
 async function sendMessage() {
-  if (state.generating || !state.activeId) return;
+  if (state.generating) return;
   const reason = composerBlockReason();
   if (reason) {
     if (reason !== "本文または画像を入力してください。") showToast(reason, "error");
@@ -626,11 +666,18 @@ async function sendMessage() {
   form.append("text", text);
   for (const item of pending) form.append("images", item.file, item.file.name || "pasted-image.png");
 
+  const optimisticTurn = addOptimisticTurn(text, pending);
   setGenerating(true);
   state.controller = new AbortController();
   let started = false;
   let terminal = false;
+  let createdForSend = false;
+  const submittedModelKey = state.draftModelKey || state.config.default_model_key;
   try {
+    if (!state.activeId) {
+      await materializeDraftConversation();
+      createdForSend = true;
+    }
     const response = await fetch(`/api/conversations/${state.activeId}/messages`, {
       method: "POST",
       headers: MUTATION_HEADERS,
@@ -647,7 +694,7 @@ async function sendMessage() {
       if (event.type === "start") {
         if (started) throw new Error("開始イベントが重複しています。");
         started = true;
-        acceptOptimisticTurn(event, text, pending);
+        acceptOptimisticTurn(event, optimisticTurn);
       } else if (event.type === "delta") {
         if (!started) throw new Error("開始前に差分を受信しました。");
         appendStreamDelta(event.assistant_message_id, event.text || "");
@@ -667,12 +714,16 @@ async function sendMessage() {
     });
     if (!started || !terminal) throw new Error("回答ストリームが途中で終了しました。");
   } catch (error) {
+    if (!state.activeId) restoreUnsentDraft(optimisticTurn, text, pending);
     if (error.name !== "AbortError") reportError(error);
   } finally {
     state.controller = null;
     try {
       if (started || state.activeId) {
         await refreshAfterTurn();
+      }
+      if (createdForSend && !started && state.messages.length === 0) {
+        await discardEmptyMaterializedConversation(submittedModelKey, text, pending);
       }
     } catch (error) {
       reportError(error);
@@ -682,46 +733,81 @@ async function sendMessage() {
   }
 }
 
-function acceptOptimisticTurn(event, text, pending) {
+async function discardEmptyMaterializedConversation(modelKey, text, pending) {
+  const emptyConversationId = state.activeId;
+  if (emptyConversationId) {
+    await apiJson(`/api/conversations/${emptyConversationId}`, { method: "DELETE" });
+    state.conversations = state.conversations.filter((item) => item.id !== emptyConversationId);
+  }
+  beginNewChat(modelKey);
+  state.pendingFiles = pending;
+  elements.composerInput.value = text;
+  resizeComposer();
+  renderAttachmentTray();
+  updateComposerState();
+}
+
+function restoreUnsentDraft(optimisticTurn, text, pending) {
+  state.messages = state.messages.filter(
+    (message) => message !== optimisticTurn.userMessage && message !== optimisticTurn.assistantMessage,
+  );
+  state.pendingFiles = pending;
+  elements.composerInput.value = text;
+  resizeComposer();
+  renderAttachmentTray();
+  renderMessages({ forceBottom: true });
+}
+
+function addOptimisticTurn(text, pending) {
   const now = new Date().toISOString();
   const attachments = pending.map((item, index) => ({
     id: `pending-${index}`,
     original_name: item.file.name || "貼り付け画像",
     content_url: item.url,
   }));
-  state.messages.push(
-    {
-      id: event.user_message_id,
-      role: "user",
-      content: text,
-      status: "completed",
-      context_epoch: event.context_epoch,
-      included_in_context: false,
-      error_code: null,
-      error_message: null,
-      created_at: now,
-      updated_at: now,
-      attachments,
-      pending_context: true,
-    },
-    {
-      id: event.assistant_message_id,
-      role: "assistant",
-      content: "",
-      status: "streaming",
-      context_epoch: event.context_epoch,
-      included_in_context: false,
-      error_code: null,
-      error_message: null,
-      created_at: now,
-      updated_at: now,
-      attachments: [],
-    },
-  );
+  const contextEpoch = activeConversation()?.context_epoch || 1;
+  const localId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const userMessage = {
+    id: `pending-user-${localId}`,
+    role: "user",
+    content: text,
+    status: "completed",
+    context_epoch: contextEpoch,
+    included_in_context: false,
+    error_code: null,
+    error_message: null,
+    created_at: now,
+    updated_at: now,
+    attachments,
+    pending_context: true,
+  };
+  const assistantMessage = {
+    id: `pending-assistant-${localId}`,
+    role: "assistant",
+    content: "",
+    status: "streaming",
+    context_epoch: contextEpoch,
+    included_in_context: false,
+    error_code: null,
+    error_message: null,
+    created_at: now,
+    updated_at: now,
+    attachments: [],
+  };
+  state.messages.push(userMessage, assistantMessage);
   state.pendingFiles = [];
   elements.composerInput.value = "";
   resizeComposer();
   renderAttachmentTray();
+  renderMessages({ forceBottom: true });
+  return { userMessage, assistantMessage };
+}
+
+function acceptOptimisticTurn(event, optimisticTurn) {
+  optimisticTurn.userMessage.id = event.user_message_id;
+  optimisticTurn.userMessage.context_epoch = event.context_epoch;
+  optimisticTurn.assistantMessage.id = event.assistant_message_id;
+  optimisticTurn.assistantMessage.context_epoch = event.context_epoch;
   renderMessages({ forceBottom: true });
 }
 
@@ -889,8 +975,8 @@ function handleComposerKeydown(event) {
 function updateComposerState() {
   const active = activeConversation();
   const reason = composerBlockReason();
-  elements.composerInput.disabled = !active || state.generating;
-  elements.attachButton.disabled = !active || state.generating || !state.config?.images_enabled;
+  elements.composerInput.disabled = !state.config;
+  elements.attachButton.disabled = !state.config || state.generating || !state.config?.images_enabled;
   elements.fileInput.disabled = elements.attachButton.disabled;
   elements.sendButton.disabled = Boolean(reason);
   elements.sendReason.textContent = reason && reason !== "本文または画像を入力してください。" ? reason : "";
@@ -901,13 +987,14 @@ function updateComposerState() {
 
 function composerBlockReason() {
   if (!state.config) return "設定を読み込んでいます。";
-  if (!state.activeId) return "会話を選択してください。";
   if (state.generating) return "回答を生成中です。";
   if (!state.config.llm_configured) return "APIキーが未設定です。";
   const conversation = activeConversation();
   if (conversation?.is_generating) return "この会話では回答を生成中です。";
-  if (!conversation?.model_available) return "利用できるモデルを選び直してください。";
-  const model = state.config.models.find((item) => item.key === conversation.model_key);
+  if (conversation && !conversation.model_available) return "利用できるモデルを選び直してください。";
+  const modelKey = conversation?.model_key || state.draftModelKey || state.config.default_model_key;
+  const model = state.config.models.find((item) => item.key === modelKey);
+  if (!model) return "利用できるモデルを選び直してください。";
   if (state.pendingFiles.length && !model?.supports_images) return "このモデルは画像入力に対応していません。";
   if (elements.composerInput.value.length > state.config.max_text_length) return "本文が文字数上限を超えています。";
   const requestBytes = state.pendingFiles.reduce((sum, item) => sum + item.file.size, 0) + new Blob([elements.composerInput.value]).size;
@@ -924,6 +1011,7 @@ function setGenerating(value) {
   elements.newChat.disabled = value;
   const active = activeConversation();
   if (active) renderActiveHeader(active);
+  else renderDraftHeader();
   updateComposerState();
 }
 
@@ -1048,6 +1136,70 @@ function askConfirm({ title, message, confirmLabel }) {
   return waitForDialog(elements.confirmDialog).then((value) => {
     if (returnFocus instanceof HTMLElement) returnFocus.focus();
     return value === "confirm";
+  });
+}
+
+function askDeleteConfirm(conversation, anchor) {
+  const popover = elements.deleteConfirm;
+  elements.deleteConfirmTitle.textContent = conversation.title;
+  popover.hidden = false;
+
+  const position = () => {
+    if (mobileViewport.matches) {
+      popover.style.removeProperty("left");
+      popover.style.removeProperty("top");
+      return;
+    }
+    const anchorBounds = anchor.getBoundingClientRect();
+    const popoverBounds = popover.getBoundingClientRect();
+    const left = Math.min(
+      window.innerWidth - popoverBounds.width - 10,
+      Math.max(10, anchorBounds.right - popoverBounds.width),
+    );
+    const below = anchorBounds.bottom + 8;
+    const top = below + popoverBounds.height <= window.innerHeight - 10
+      ? below
+      : Math.max(10, anchorBounds.top - popoverBounds.height - 8);
+    popover.style.left = `${left}px`;
+    popover.style.top = `${top}px`;
+  };
+  position();
+  elements.deleteConfirmCancel.focus();
+
+  return new Promise((resolve) => {
+    const finish = (accepted) => {
+      popover.hidden = true;
+      popover.style.removeProperty("left");
+      popover.style.removeProperty("top");
+      elements.deleteConfirmCancel.removeEventListener("click", cancel);
+      elements.deleteConfirmSubmit.removeEventListener("click", confirm);
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", keydown);
+      window.removeEventListener("resize", position);
+      elements.conversationList.removeEventListener("scroll", position);
+      if (anchor.isConnected) anchor.focus();
+      resolve(accepted);
+    };
+    const cancel = () => finish(false);
+    const confirm = () => finish(true);
+    const outside = (event) => {
+      if (!popover.contains(event.target) && event.target !== anchor) cancel();
+    };
+    const keydown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancel();
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        confirm();
+      }
+    };
+    elements.deleteConfirmCancel.addEventListener("click", cancel);
+    elements.deleteConfirmSubmit.addEventListener("click", confirm);
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", keydown);
+    window.addEventListener("resize", position);
+    elements.conversationList.addEventListener("scroll", position, { passive: true });
   });
 }
 

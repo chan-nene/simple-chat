@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import base64
+import socket
 import subprocess
 import sys
 import time
@@ -15,14 +16,16 @@ from playwright.sync_api import Browser, Page, expect, sync_playwright
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-BASE_URL = "http://127.0.0.1:8000"
-
-
 @pytest.fixture(scope="session")
 def ui_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     browser_root = tmp_path_factory.mktemp("browser-app")
+    with socket.socket() as available:
+        available.bind(("127.0.0.1", 0))
+        port = available.getsockname()[1]
+    base_url = f"http://127.0.0.1:{port}"
     environment = os.environ.copy()
     environment["SIMPLE_CHAT_BROWSER_ROOT"] = str(browser_root)
+    environment["SIMPLE_CHAT_BROWSER_PORT"] = str(port)
     creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     process = subprocess.Popen(
         [
@@ -33,7 +36,7 @@ def ui_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
             "--host",
             "127.0.0.1",
             "--port",
-            "8000",
+            str(port),
             "--workers",
             "1",
             "--log-level",
@@ -48,14 +51,14 @@ def ui_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
             if process.poll() is not None:
                 raise RuntimeError("browser test server exited during startup")
             try:
-                if httpx.get(f"{BASE_URL}/api/health", timeout=0.5).status_code == 200:
+                if httpx.get(f"{base_url}/api/health", timeout=0.5).status_code == 200:
                     break
             except httpx.HTTPError:
                 pass
             time.sleep(0.1)
         else:
             raise RuntimeError("browser test server did not become ready")
-        yield BASE_URL
+        yield base_url
     finally:
         process.terminate()
         try:
@@ -93,7 +96,16 @@ def test_desktop_chat_stream_markdown_model_boundary_and_sanitization(
     expect(page.locator(".topbar")).to_have_count(0)
     expect(page.locator("#sidebar #model-select")).to_be_visible()
     expect(page.locator("#retention-days")).to_have_text("7日")
+    expect(page.locator(".conversation-item")).to_have_count(0)
+    page.get_by_role("button", name="新しいチャット", exact=True).click()
+    expect(page.locator(".conversation-item")).to_have_count(0)
 
+    page.get_by_role("textbox", name="メッセージ").fill("Responses API の連鎖を確認")
+    page.get_by_role("button", name="送信", exact=True).click()
+    expect(page.locator(".message.assistant .code-frame")).to_be_visible(timeout=12_000)
+    expect(page.locator(".message.assistant .ai-avatar img").first).to_have_attribute(
+        "src", "/favicon.svg"
+    )
     rename_button = page.locator(".conversation-item.active").get_by_role(
         "button", name="会話タイトルを変更"
     )
@@ -103,9 +115,26 @@ def test_desktop_chat_stream_markdown_model_boundary_and_sanitization(
     page.locator("#rename-cancel").click()
     expect(rename_button).to_be_focused()
 
-    page.get_by_role("textbox", name="メッセージ").fill("Responses API の連鎖を確認")
-    page.get_by_role("button", name="送信", exact=True).click()
-    expect(page.locator(".message.assistant .code-frame")).to_be_visible(timeout=12_000)
+    delete_button = page.locator(".conversation-item.active").get_by_role(
+        "button", name="会話を削除"
+    )
+    delete_button.click()
+    delete_popover = page.locator("#delete-confirm")
+    expect(delete_popover).to_be_visible()
+    expect(page.locator("#confirm-dialog")).not_to_be_visible()
+    proximity = page.evaluate(
+        """() => {
+          const button = document.querySelector('.conversation-item.active .delete').getBoundingClientRect();
+          const popover = document.querySelector('#delete-confirm').getBoundingClientRect();
+          return Math.hypot(
+            button.left + button.width / 2 - (popover.left + popover.width / 2),
+            button.top + button.height / 2 - (popover.top + popover.height / 2),
+          );
+        }"""
+    )
+    assert proximity < 220
+    page.locator("#delete-confirm-cancel").click()
+    expect(delete_button).to_be_focused()
     copy_button = page.get_by_role("button", name="コードをコピー")
     expect(copy_button).to_be_visible()
     expect(copy_button.locator("svg.copy-icon")).to_be_visible()
@@ -139,6 +168,20 @@ def test_desktop_chat_stream_markdown_model_boundary_and_sanitization(
     sidebar_toggle.click()
     expect(page.locator("#app-shell")).to_have_class(re.compile(r".*sidebar-collapsed.*"))
     expect(page.locator("#sidebar")).to_have_css("width", "58px")
+    collapsed_arrow = page.locator("#sidebar-toggle").evaluate(
+        """button => {
+          const svg = button.querySelector('svg').getBoundingClientRect();
+          const arrow = button.querySelector('.toggle-arrow');
+          const bounds = arrow.getBoundingClientRect();
+          return {
+            arrowCenter: bounds.left + bounds.width / 2,
+            svgCenter: svg.left + svg.width / 2,
+            transformBox: getComputedStyle(arrow).transformBox,
+          };
+        }"""
+    )
+    assert collapsed_arrow["transformBox"] == "fill-box"
+    assert collapsed_arrow["arrowCenter"] > collapsed_arrow["svgCenter"]
     page.get_by_role("button", name="サイドバーを展開する").click()
     expect(page.locator("#app-shell")).not_to_have_class(re.compile(r".*sidebar-collapsed.*"))
 
@@ -232,6 +275,31 @@ def test_stop_and_ime_enter_reconcile_to_persisted_state(browser: Browser, ui_se
     page.close()
 
 
+def test_sent_message_and_generation_state_render_before_upstream_starts(
+    browser: Browser, ui_server: str
+) -> None:
+    page = browser.new_page(viewport={"width": 1200, "height": 800})
+    page.goto(ui_server, wait_until="networkidle")
+    page.get_by_role("button", name="新しいチャット", exact=True).click()
+    editor = page.get_by_role("textbox", name="メッセージ")
+    editor.fill("__startup_slow__")
+    editor.press("Enter")
+
+    expect(page.locator(".message.user .message-body")).to_have_text(
+        "__startup_slow__", timeout=500
+    )
+    expect(page.locator(".message.assistant .generation-placeholder")).to_have_text(
+        "回答を生成中…", timeout=500
+    )
+    expect(page.locator(".message.assistant .status-badge")).to_have_text("生成中", timeout=500)
+    expect(editor).to_have_value("")
+    expect(editor).to_be_enabled()
+    editor.fill("次の質問を準備")
+    expect(page.locator(".message.assistant .status-badge")).to_have_count(0, timeout=12_000)
+    expect(editor).to_have_value("次の質問を準備")
+    page.close()
+
+
 def test_file_picker_paste_and_drop_images(browser: Browser, ui_server: str) -> None:
     page = browser.new_page(viewport={"width": 1200, "height": 800})
     page.goto(ui_server, wait_until="networkidle")
@@ -301,4 +369,54 @@ def test_scrolling_up_pauses_auto_follow(browser: Browser, ui_server: str) -> No
     )
     assert distance < 100
     page.get_by_role("button", name="停止").click()
+    page.close()
+
+
+def test_deleting_all_history_does_not_create_an_empty_conversation(
+    browser: Browser, ui_server: str
+) -> None:
+    page = browser.new_page(viewport={"width": 1200, "height": 800})
+    created_requests: list[str] = []
+    page.on(
+        "request",
+        lambda request: created_requests.append(request.url)
+        if request.method == "POST" and request.url.endswith("/api/conversations")
+        else None,
+    )
+    page.goto(ui_server, wait_until="networkidle")
+
+    items = page.locator(".conversation-item")
+    while (count := items.count()) > 0:
+        items.first.get_by_role("button", name="会話を削除").click()
+        page.locator("#delete-confirm-submit").click()
+        expect(items).to_have_count(count - 1)
+
+    expect(page.locator("#conversation-count")).to_have_text("0")
+    expect(page.get_by_role("textbox", name="メッセージ")).to_be_enabled()
+    assert page.request.get(f"{ui_server}/api/conversations").json() == []
+    assert created_requests == []
+    page.reload(wait_until="networkidle")
+    expect(page.locator(".conversation-item")).to_have_count(0)
+    page.close()
+
+
+def test_reopening_url_starts_with_an_unsaved_new_chat(
+    browser: Browser, ui_server: str
+) -> None:
+    page = browser.new_page(viewport={"width": 1200, "height": 800})
+    page.goto(ui_server, wait_until="networkidle")
+    editor = page.get_by_role("textbox", name="メッセージ")
+    editor.fill("再表示確認")
+    editor.press("Enter")
+    expect(page.locator(".message.assistant .status-badge")).to_have_count(0, timeout=12_000)
+    history_count = page.locator(".conversation-item").count()
+    assert history_count == 1
+
+    page.reload(wait_until="networkidle")
+
+    expect(page.get_by_text("ここから会話を始めます")).to_be_visible()
+    expect(page.locator(".message")).to_have_count(0)
+    expect(page.locator(".conversation-item")).to_have_count(history_count)
+    expect(page.locator(".conversation-item.active")).to_have_count(0)
+    expect(editor).to_be_enabled()
     page.close()

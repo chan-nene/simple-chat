@@ -34,6 +34,8 @@ class BrowserDemoLLM:
             answer = "\n\n".join(f"観測行 {index}: Response chain remains stable." for index in range(120))
             delay = 0.02
             chunk_size = 40
+        elif text == "__startup_slow__":
+            await asyncio.sleep(1)
         yield LLMStreamEvent("created", response_id=response_id)
         for offset in range(0, len(answer), chunk_size):
             await asyncio.sleep(delay)
@@ -46,4 +48,5 @@ class BrowserDemoLLM:
 
 settings = load_settings("config.example.toml").model_copy(deep=True)
 settings.project_root = Path(os.environ.get("SIMPLE_CHAT_BROWSER_ROOT", "C:/tmp/simple-chat-browser"))
+settings.server.port = int(os.environ.get("SIMPLE_CHAT_BROWSER_PORT", "8000"))
 app = create_app(settings, llm_service=BrowserDemoLLM())

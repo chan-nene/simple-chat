@@ -74,3 +74,4 @@ max_request_size_mb = 45
 
 [ui]
 title = "Simple Chat"
+ai_icon = "/favicon.svg"

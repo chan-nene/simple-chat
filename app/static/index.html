@@ -114,6 +114,16 @@
   <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
   <div class="visually-hidden" id="stream-status" aria-live="polite" aria-atomic="true"></div>
 
+  <div class="delete-confirm" id="delete-confirm" role="dialog" aria-labelledby="delete-confirm-title" hidden>
+    <p class="delete-confirm-label">会話を削除しますか？</p>
+    <p class="delete-confirm-title" id="delete-confirm-title"></p>
+    <p class="delete-confirm-note">履歴と添付画像が削除されます。</p>
+    <div class="delete-confirm-actions">
+      <button class="secondary-button" id="delete-confirm-cancel" type="button">キャンセル</button>
+      <button class="danger-button" id="delete-confirm-submit" type="button">削除</button>
+    </div>
+  </div>
+
   <dialog class="confirm-dialog" id="confirm-dialog" aria-labelledby="dialog-title">
     <form method="dialog">
       <p class="eyebrow">CONFIRM ACTION</p>
