@@ -102,5 +102,6 @@ python tools\smoke_openai.py
 ## 補足
 
 - ブラウザ向けライブラリは `app/static/vendor/` に同梱しています。
+- 本アプリ自体のライセンスｈが現状未指定です。
 - 各ライブラリのライセンス文は同ディレクトリにあります。
 - 詳細な設定例は [config.example.toml](config.example.toml) を参照してください。
