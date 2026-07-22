@@ -1,52 +1,46 @@
 from __future__ import annotations
 
-import asyncio
-import os
-import uuid
+import argparse
+import itertools
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from app.config import load_settings
-from app.domain import LLMStreamEvent
-from app.main import create_app
+import uvicorn
+
+import run
 
 
-class BrowserDemoLLM:
-    async def stream_response(self, **kwargs: object) -> AsyncIterator[LLMStreamEvent]:
-        response_id = f"resp_browser_{uuid.uuid4().hex}"
-        text = str(kwargs.get("user_text", ""))
-        answer = (
-            "## 観測結果\n\n"
-            f"受け取ったメッセージは **{text or '画像入力'}** です。\n\n"
-            "```python\n"
-            "def context_chain(previous_response_id):\n"
-            "    return previous_response_id or 'new epoch'\n"
-            "```\n\n"
-            "履歴本文を再送せず、Response ID で文脈を継続します。"
-        )
-        delay = 0.025
-        chunk_size = 7
-        if text == "__slow__":
-            answer = "停止検証用の長い応答です。" * 120
-            delay = 0.08
-            chunk_size = 5
-        elif text == "__long__":
-            answer = "\n\n".join(f"観測行 {index}: Response chain remains stable." for index in range(120))
-            delay = 0.02
-            chunk_size = 40
-        elif text == "__startup_slow__":
-            await asyncio.sleep(1)
-        yield LLMStreamEvent("created", response_id=response_id)
-        for offset in range(0, len(answer), chunk_size):
-            await asyncio.sleep(delay)
-            yield LLMStreamEvent("delta", text=answer[offset : offset + chunk_size])
-        yield LLMStreamEvent("completed", response_id=response_id)
+class BrowserLLM:
+    def __init__(self) -> None:
+        self.ids = itertools.count(1)
+
+    async def stream(self, **kwargs: object) -> AsyncIterator[run.StreamEvent]:
+        response_id = f"resp_browser_{next(self.ids)}"
+        yield run.StreamEvent("created", response_id=response_id)
+        text = f"受信しました: {kwargs.get('text', '')}\n\n```python\nprint('ok')\n```"
+        for piece in (text[:12], text[12:]):
+            yield run.StreamEvent("delta", text=piece)
+        yield run.StreamEvent("completed", response_id=response_id)
 
     async def delete_response(self, response_id: str) -> None:
         return None
 
 
-settings = load_settings("config.example.toml").model_copy(deep=True)
-settings.project_root = Path(os.environ.get("SIMPLE_CHAT_BROWSER_ROOT", "C:/tmp/simple-chat-browser"))
-settings.server.port = int(os.environ.get("SIMPLE_CHAT_BROWSER_PORT", "8000"))
-app = create_app(settings, llm_service=BrowserDemoLLM())
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--data", type=Path, required=True)
+    args = parser.parse_args()
+    settings = run.load_settings("config.example.toml").model_copy(deep=True)
+    settings.root = args.data.resolve()
+    settings.server.port = args.port
+    uvicorn.run(
+        run.create_app(settings, llm_service=BrowserLLM()),
+        host="127.0.0.1",
+        port=args.port,
+        log_level="warning",
+    )
+
+
+if __name__ == "__main__":
+    main()

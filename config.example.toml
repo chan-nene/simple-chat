@@ -1,30 +1,6 @@
-[llm]
-provider = "openai"
-default_model_key = "gpt-5.6-luna"
-
-[[llm.models]]
-key = "gpt-5.6-luna"
+[model]
+target = "gpt-5.6-luna"
 label = "GPT-5.6 Luna"
-provider_model = "gpt-5.6-luna"
-supports_images = true
-supports_streaming = true
-enabled = true
-
-[[llm.models]]
-key = "gpt-5.6-terra"
-label = "GPT-5.6 Terra"
-provider_model = "gpt-5.6-terra"
-supports_images = true
-supports_streaming = true
-enabled = true
-
-[[llm.models]]
-key = "gpt-5.6-sol"
-label = "GPT-5.6 Sol"
-provider_model = "gpt-5.6-sol"
-supports_images = true
-supports_streaming = true
-enabled = true
 
 [responses]
 instructions = """
@@ -34,11 +10,6 @@ instructions = """
 事実と推測を区別してください。
 """
 max_output_tokens = 8192
-store = true
-
-[responses.compaction]
-enabled = false
-compact_threshold = 200000
 
 [messages]
 max_text_length = 100000
@@ -49,23 +20,14 @@ max_files = 4
 max_file_size_mb = 10
 max_dimension_px = 2048
 max_decoded_pixels = 40000000
-allowed_types = ["image/jpeg", "image/png", "image/webp"]
-convert_to = "webp"
 webp_quality = 90
-remove_exif = true
 
 [database]
 path = "data/chat.db"
-wal_mode = true
 
 [storage]
 upload_directory = "data/uploads"
 temp_directory = "data/tmp"
-
-[retention]
-history_days = 7
-cleanup_interval_hours = 24
-delete_remote_responses = true
 
 [server]
 host = "127.0.0.1"
@@ -74,4 +36,4 @@ max_request_size_mb = 45
 
 [ui]
 title = "Simple Chat"
-ai_icon = "/favicon.svg"
+ai_icon = "/ai-icon.svg"

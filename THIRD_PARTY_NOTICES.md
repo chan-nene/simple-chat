@@ -1,38 +1,26 @@
 # Third-Party Software Notices
 
-This project includes the following third-party software in
-`app/static/vendor/`.
+Simple Chat loads the following browser libraries from version-pinned CDN URLs in `web/index.html`. They are not committed to this repository.
 
 ## marked
 
 - Version: 15.0.12
-- License: MIT License
-- Copyright: MarkedJS and Christopher Jeffrey
+- License: MIT
 - Source: <https://github.com/markedjs/marked>
-- Bundled file: `app/static/vendor/marked-15.0.12.umd.js`
-- License text: [`app/static/vendor/LICENSE-marked.txt`](app/static/vendor/LICENSE-marked.txt)
+- CDN: jsDelivr
 
 ## DOMPurify
 
 - Version: 3.4.11
-- License: Apache License 2.0 or Mozilla Public License 2.0
-- Copyright: Cure53 and other contributors
+- License: Apache-2.0 or MPL-2.0
 - Source: <https://github.com/cure53/DOMPurify>
-- Bundled file: `app/static/vendor/purify-3.4.11.min.js`
-- License texts:
-  - [`app/static/vendor/LICENSE-dompurify-apache.txt`](app/static/vendor/LICENSE-dompurify-apache.txt)
-  - [`app/static/vendor/LICENSE-dompurify-mpl.txt`](app/static/vendor/LICENSE-dompurify-mpl.txt)
+- CDN: jsDelivr
 
 ## highlight.js
 
 - Version: 11.11.1
-- License: BSD 3-Clause License
-- Copyright: Josh Goebel and other contributors
+- License: BSD-3-Clause
 - Source: <https://github.com/highlightjs/highlight.js>
-- Bundled files:
-  - `app/static/vendor/highlight-11.11.1.min.js`
-  - `app/static/vendor/github-dark-11.11.1.min.css`
-- License text: [`app/static/vendor/LICENSE-highlightjs.txt`](app/static/vendor/LICENSE-highlightjs.txt)
+- CDN: cdnjs
 
-The notices above apply only to the listed third-party components. They do not
-change the license of this project itself.
+Refer to each upstream project for its complete license text.

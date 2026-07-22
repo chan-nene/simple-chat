@@ -1,19 +1,35 @@
+# Python caches and test artifacts
 __pycache__/
 *.py[cod]
-*.log
 .pytest_cache/
 .test-tmp/
-.venv/
-.env
-.env.*
-!.env.example
-config.toml
-data/
+.test-*/
+*.log
 playwright-report/
 test-results/
 htmlcov/
 .coverage
 .coverage.*
+
+# Local environments and secrets
+.venv*/
+.env
+.env.*
+!.env.example
+
+# Local app settings and state
+config.toml
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Local verification and agent artifacts
+.verify-*/
+.agents/
+.codex/
 
 # Editor and OS files
 .idea/

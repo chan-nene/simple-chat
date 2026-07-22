@@ -1,27 +1,10 @@
 # Simple Chat
 
-OpenAI Responses APIを利用する、ローカル実行向けのシンプルなチャットアプリです。FastAPIとVanilla JavaScriptで構成され、会話履歴はローカルのSQLiteに保存します。
+OpenAI Responses APIを使う、ローカルPC用チャットアプリです。
 
-## 主な機能
+## セットアップ（Windows）
 
-- Responses APIによるストリーミング応答
-- 会話の作成、タイトル変更、削除
-- Markdown、コードブロック表示
-- JPEG、PNG、WebP画像の添付
-- モデル切り替え
-- 一定期間を過ぎた会話と添付ファイルの自動削除
-- APIキー未設定時の閲覧専用モード
-
-## 必要環境
-
-- Python 3.11以上
-- OpenAI APIキー
-
-## セットアップ
-
-リポジトリを取得し、仮想環境を作成して依存関係をインストールします。
-
-### Windows PowerShell
+Python 3.11以上を使用します。
 
 ```powershell
 py -3.11 -m venv .venv
@@ -32,80 +15,63 @@ $env:OPENAI_API_KEY = "your-api-key"
 python run.py
 ```
 
-### macOS / Linux
+起動後、<http://127.0.0.1:8000>を開きます。APIキーは環境変数にだけ設定してください。
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-cp config.example.toml config.toml
-export OPENAI_API_KEY="your-api-key"
-python run.py
+会社PCへは次を同じ構成でコピーします。
+
+```text
+run.py
+requirements.txt
+config.example.toml → config.toml
+web/
+  index.html
+  styles.css
+  app.js
+  ai-icon.svg
 ```
-
-起動後、<http://127.0.0.1:8000> をブラウザで開いてください。
-
-> [!IMPORTANT]
-> APIキーは環境変数で設定し、設定ファイルやソースコードへ書き込まないでください。
 
 ## 設定
 
-`config.example.toml` を `config.toml` にコピーして編集します。`config.toml` はGitの管理対象外です。
+モデルは`config.toml`を編集してアプリを再起動すると変更できます。
 
-主に次の項目を変更できます。
+```toml
+[model]
+target = "APIへ渡すモデルID"
+label = "画面に表示するモデル名"
+```
 
-- 使用するモデル
-- 応答のinstructionsと最大トークン数
-- 画像のサイズ、枚数、形式
-- 会話履歴の保持日数
-- ポート番号と画面タイトル
-- AIメッセージのアイコン画像
+AIアイコンは画像を`web/`へ置き、`[ui]`の`ai_icon`へ指定します。同じ画像がfaviconにも使われます。
 
-AIアイコンは画像を `app/static/` 配下へ置き、`[ui]` の `ai_icon` にルート相対パスを指定します。
-たとえば `app/static/my-ai.png` を使う場合は `ai_icon = "/my-ai.png"` と記載します。
+```toml
+[ui]
+ai_icon = "/my-ai.png"
+```
 
-別の場所にある設定ファイルを使う場合は、`SIMPLE_CHAT_CONFIG` 環境変数にパスを指定してください。
+## 動作
 
-APIキーを設定せずに起動した場合、保存済みの会話は閲覧できますが、新しいメッセージは送信できません。
+- 更新順で直近5会話を保存
+- 正常完了したターンだけを保存
+- Response ID失効後の会話は閲覧・削除専用
+- 会話DBと添付画像は`data/`へ保存
 
-## データ保存とプライバシー
+## CDN
 
-ローカルデータは既定で `data/` 配下に保存されます。このディレクトリはGitの管理対象外です。
+`web/index.html`から直接読み込みます。
 
-- 会話履歴: `data/chat.db`
-- 添付画像: `data/uploads/`
-- 一時ファイル: `data/tmp/`
+| ライブラリ | バージョン | CDN |
+|---|---:|---|
+| marked | 15.0.12 | jsDelivr |
+| DOMPurify | 3.4.11 | jsDelivr |
+| highlight.js | 11.11.1 | cdnjs |
+| GitHub Dark theme | 11.11.1 | cdnjs |
 
-会話の文脈にはOpenAIの `previous_response_id` を使用します。メッセージ本文や画像は、応答生成のためOpenAI APIへ送信されます。利用前にOpenAIのデータ利用条件を確認してください。
+ライセンスは`THIRD_PARTY_NOTICES.md`を参照してください。
 
-このアプリには認証機能がありません。サーバーは `127.0.0.1` でのみ起動する設計であり、LANやインターネットへ公開しないでください。
+## テスト（任意）
 
-## テスト
-
-```bash
+```powershell
 python -m pip install -r requirements-dev.txt
-playwright install chromium
 python -m pytest -q
 ```
 
-通常のテストはOpenAI APIへ接続しません。
-
-実APIとの疎通確認は、APIキーを設定したうえで明示的に有効化します。
-
-```bash
-SIMPLE_CHAT_RUN_REAL_API=1 python tools/smoke_openai.py
-```
-
-PowerShellでは次のように実行します。
-
-```powershell
-$env:SIMPLE_CHAT_RUN_REAL_API = "1"
-python tools\smoke_openai.py
-```
-
-## 補足
-
-- ブラウザ向けライブラリは `app/static/vendor/` に同梱しています。
-- 本アプリ自体のライセンスｈが現状未指定です。
-- 各ライブラリのライセンス文は同ディレクトリにあります。
-- 詳細な設定例は [config.example.toml](config.example.toml) を参照してください。
+このアプリには認証機能がありません。外部公開せず、`127.0.0.1`で使用してください。
