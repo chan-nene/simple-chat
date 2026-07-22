@@ -899,9 +899,6 @@ function askDeleteConfirm(anchor) {
       if (event.key === "Escape") {
         event.preventDefault();
         cancel();
-      } else if (event.key === "Enter") {
-        event.preventDefault();
-        confirm();
       }
     };
     elements.deleteConfirmCancel.addEventListener("click", cancel);

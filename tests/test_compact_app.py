@@ -126,6 +126,7 @@ def test_failed_turn_is_not_saved_and_reference_loss_expires_conversation(
         headers=mutation(),
     )
     assert events(failed)[-1]["type"] == "error"
+    assert "resp_failed" in fake.deleted
     assert len(client.get(f"/api/conversations/{conversation_id}").json()["messages"]) == 2
 
     fake.plans.append([run.LLMError("context_expired", "失効しました。")])
@@ -173,6 +174,7 @@ def test_failed_new_chat_creates_no_history(client: TestClient, fake: FakeLLM) -
     response = client.post("/api/messages", data={"text": "失敗"}, headers=mutation())
 
     assert events(response)[-1]["type"] == "error"
+    assert "resp_failed" in fake.deleted
     assert client.get("/api/state").json()["conversations"] == []
 
 

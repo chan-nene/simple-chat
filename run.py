@@ -768,14 +768,18 @@ def create_app(settings: Settings | None = None, *, llm_service: Any | None = No
     llm = llm_service or (OpenAIService(api_key) if api_key else None)
     locks: dict[str, asyncio.Lock] = {}
 
+    async def delete_remote_response(response_id: str) -> None:
+        if llm is None:
+            return
+        try:
+            await llm.delete_response(response_id)
+        except Exception as exc:
+            logger.warning("OpenAI Response削除失敗: %s", type(exc).__name__)
+
     async def cleanup(snapshot: DeletionSnapshot) -> None:
         await asyncio.to_thread(image_service.delete_names, snapshot.attachment_names)
-        if llm is not None:
-            for response_id in snapshot.response_ids:
-                try:
-                    await llm.delete_response(response_id)
-                except Exception as exc:
-                    logger.warning("OpenAI Response削除失敗: %s", type(exc).__name__)
+        for response_id in snapshot.response_ids:
+            await delete_remote_response(response_id)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -883,6 +887,7 @@ def create_app(settings: Settings | None = None, *, llm_service: Any | None = No
         await lock.acquire()
         staged: list[StagedImage] = []
         iterator: AsyncIterator[StreamEvent] | None = None
+        created_response_id: str | None = None
         try:
             target = await asyncio.to_thread(database.generation_target, parsed, settings)
             staged = await image_service.stage(images)
@@ -895,8 +900,9 @@ def create_app(settings: Settings | None = None, *, llm_service: Any | None = No
                 max_output_tokens=settings.responses.max_output_tokens,
             ).__aiter__()
             first = await anext(iterator)
-            if first.type != "created":
+            if first.type != "created" or not first.response_id:
                 raise LLMError("upstream_error", "回答を開始できませんでした。", True)
+            created_response_id = first.response_id
         except LLMError as exc:
             if exc.code == "context_expired" and parsed:
                 await asyncio.to_thread(database.mark_expired, parsed)
@@ -927,6 +933,8 @@ def create_app(settings: Settings | None = None, *, llm_service: Any | None = No
                     elif event.type == "completed":
                         if not event.response_id:
                             raise LLMError("upstream_error", "回答IDを取得できませんでした。", True)
+                        if event.response_id != created_response_id:
+                            raise LLMError("upstream_error", "回答IDが一致しませんでした。", True)
                         saved_id, snapshots = await asyncio.shield(
                             asyncio.to_thread(
                                 database.save_turn,
@@ -962,6 +970,8 @@ def create_app(settings: Settings | None = None, *, llm_service: Any | None = No
                 lock.release()
                 if iterator is not None:
                     await close_iterator(iterator)
+                if not saved and created_response_id:
+                    await asyncio.shield(delete_remote_response(created_response_id))
 
         return StreamingResponse(stream_body(), media_type="application/x-ndjson; charset=utf-8")
 
